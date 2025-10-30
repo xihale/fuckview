@@ -5,22 +5,10 @@ export async function compile(
     eID: string | number,
     stuCode: string,
     questionFullName: string,
-): Promise<void> {
-    let cleanStuCode = stuCode;
-    cleanStuCode = cleanStuCode.trim();
+): Promise<CompileResponse> {
+    let cleanStuCode = stuCode.trim();
 
-    try {
-        stuCode = btoa(cleanStuCode);
-    } catch (error) {
-        // 方法2: 使用 TextEncoder
-        try {
-            const encoder = new TextEncoder();
-            const encoded = encoder.encode(cleanStuCode);
-            stuCode = btoa(String.fromCharCode(...encoded));
-        } catch (error2) {
-            throw new Error(`无法编码文件内容: ${error}`);
-        }
-    }
+    stuCode = Buffer.from(cleanStuCode).toString("base64");
 
     // Create form data boundary
     const boundary =
@@ -69,10 +57,9 @@ export async function compile(
     );
 
     const data = (await res.json()) as CompileResponse;
-    if (data.code != 200 || !data.data.result.includes("编译成功")) {
-        console.log(
-            `编译失败 - 题目: ${questionFullName}, 结果: ${data.data.result}`,
-        );
-        throw new Error(data.data.result);
-    }
+    return data;
+}
+
+export function isCompileSuccess(compileResult: CompileResponse): boolean {
+    return compileResult.code === 200 && compileResult.data.result.includes("编译成功");
 }
