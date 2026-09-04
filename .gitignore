@@ -1,3 +1,5 @@
 node_modules/
 .envrc
 api/config.ts
+gen/
+index.js
