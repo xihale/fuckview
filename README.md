@@ -34,6 +34,9 @@ AnyView 并非很垃圾，其实在我看来还是挺不错的。
 ```bash
 bun install
 
+# 0. 全自动: write -> submit -> fix/submit 循环直到结束（挂后台跑）
+bun index.ts all [--brush 8-18] [--max-attempts 3]
+
 # 1. 批量生成未通过题目的答案（走硅基流动 batch API, 半价, 结果落盘到 gen/）
 bun index.ts write [--model deepseek-ai/DeepSeek-V3.2] [--limit 20] [--dry]
 
@@ -50,7 +53,7 @@ bun index.ts list-batches    # 历史 batch
 bun index.ts legacy          # 老流程: 直接用 data/ 现成答案逐题提交
 ```
 
-注意: `submit` 刷时长是真实等待（默认每题 8~18 分钟），挂后台跑。
+注意: `submit` 刷时长是真实等待（默认每题 8~18 分钟），挂后台跑。`submit` 只提交 pending 的答案；failed 的先 `fix` 重新生成再提交，避免浪费刷时长的等待。
 
 ## 目录
 

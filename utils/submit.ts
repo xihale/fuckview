@@ -15,6 +15,7 @@ import {
 } from "./store";
 import type { AnswerRecord } from "./store";
 import { getCatalogList } from "../api/getCatalogList";
+import type { GetCatalogListResponse } from "../types/catalog";
 
 export interface SubmitOptions {
     // 刷时长目标分钟: 数字或区间, 默认 [8, 18]
@@ -154,23 +155,23 @@ export async function submitAnswers(opts: SubmitOptions = {}): Promise<void> {
             records.push(rec);
         }
     } else {
-        records = (await loadAllAnswers()).filter(
-            (r) => r.status === "pending" || r.status === "failed",
-        );
+        // pending 才值得花刷时长的成本; failed 的应先 fix 再 submit
+        records = (await loadAllAnswers()).filter((r) => r.status === "pending");
         // 按 eid 排序, 从头按章节顺序提交
         records.sort((a, b) => a.eid - b.eid);
     }
     if (opts.limit) records = records.slice(0, opts.limit);
 
     if (records.length === 0) {
-        console.log("没有待提交的答案 (gen/answers 下无 pending/failed 记录)");
+        console.log("没有待提交的答案 (gen/answers 下无 pending 记录; failed 请先 fix)");
         return;
     }
     console.log(`待提交 ${records.length} 题`);
 
-    // 校验 token 可用: 先拉一次 catalog
+    // 校验 token 可用 + 修复缺失元信息
     try {
-        await getCatalogList();
+        const catalog = await getCatalogList();
+        await fixMissingMeta(records, catalog);
     } catch (err) {
         throw new Error(`AnyView token 可能失效（获取题目列表失败）: ${err}`);
     }
@@ -186,18 +187,22 @@ export async function submitAnswers(opts: SubmitOptions = {}): Promise<void> {
     console.log(`\n提交完成: ✓${passed} ✗${failed}`);
 }
 
-// submit 时需要题目 chapName; 记录里已存, 但为保险允许从 catalog 修复
-export async function fixMissingMeta(records: AnswerRecord[]): Promise<void> {
+// 记录里 chapName/eid 缺失时(如 ingest 时 catalog 挂了)从 catalog 补齐
+export async function fixMissingMeta(
+    records: AnswerRecord[],
+    catalog?: GetCatalogListResponse,
+): Promise<void> {
     const missing = records.filter((r) => !r.chapName || !r.eid);
     if (missing.length === 0) return;
-    const catalog = await getCatalogList();
+    const meta = catalog ?? (await getCatalogList());
     for (const rec of missing) {
-        const p = catalog.data.find((x) => x.pname === rec.pname);
+        const p = meta.data.find((x) => x.pname === rec.pname);
         if (p) {
             rec.chapName = p.chapName;
             rec.eid = p.eid;
             rec.questionType = p.questionType;
             await saveAnswer(rec);
+            console.log(`  ✓ 补齐 ${rec.pname} 元信息 (eid=${p.eid}, 第${p.chapName}章)`);
         }
     }
 }
