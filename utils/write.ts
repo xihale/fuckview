@@ -12,6 +12,11 @@ import {
     retrieveBatch,
     extractOutputText,
 } from "../api/siliconflow";
+import {
+    chatCompletion,
+    DEFAULT_MODEL as NORMAL_DEFAULT_MODEL,
+    extractChatText,
+} from "../api/normal";
 import type { BatchInputLine } from "../types/siliconflow";
 import type { CatalogItem } from "../types/catalog";
 import {
@@ -29,6 +34,8 @@ import {
 
 export interface WriteOptions {
     model?: string;
+    /** batch（默认）或 normal（逐题 Chat Completions） */
+    mode?: "batch" | "normal";
     limit?: number;
     dry?: boolean;
     maxTokens?: number;
@@ -60,7 +67,8 @@ export async function collectProblems(
 // write 主流程
 export async function writeAnswers(opts: WriteOptions = {}): Promise<void> {
     ensureGenDirs();
-    const model = opts.model ?? DEFAULT_MODEL;
+    const mode = opts.mode ?? "batch";
+    const model = opts.model ?? (mode === "normal" ? NORMAL_DEFAULT_MODEL : DEFAULT_MODEL);
     const problems = await collectProblems({ limit: opts.limit });
 
     if (problems.length === 0) {
@@ -118,7 +126,16 @@ export async function writeAnswers(opts: WriteOptions = {}): Promise<void> {
     }
 
     if (opts.dry) {
+        if (mode === "normal") {
+            console.log(`[DRY] 将发送 ${lines.length} 条普通 API 请求，示例: ${lines.slice(0, 5).map((l) => l.custom_id).join(", ")}`);
+            return;
+        }
         console.log(`[DRY] 将上传 ${lines.length} 条请求，示例 custom_id: ${lines.slice(0, 5).map((l) => l.custom_id).join(", ")}`);
+        return;
+    }
+
+    if (mode === "normal") {
+        await generateNormalAnswers(valid, docs, model, opts.maxTokens);
         return;
     }
 
@@ -170,6 +187,42 @@ export async function writeAnswers(opts: WriteOptions = {}): Promise<void> {
     }
 
     await ingestBatchResults(final.id);
+}
+
+// 普通 API 逐题生成。每题立即落盘，进程中断时不会丢掉已经完成的结果。
+async function generateNormalAnswers(
+    problems: CatalogItem[],
+    docs: Map<string, string>,
+    model: string,
+    maxTokens?: number,
+): Promise<void> {
+    let ok = 0;
+    for (const [index, problem] of problems.entries()) {
+        const doc = docs.get(problem.pname);
+        if (!doc) continue;
+        process.stdout.write(`[${index + 1}/${problems.length}] ${problem.pname} ... `);
+        try {
+            const response = await chatCompletion(
+                [
+                    { role: "system", content: SYSTEM_PROMPT },
+                    { role: "user", content: buildQuestionPrompt(problem, doc) },
+                ],
+                { model, temperature: 0.2, maxTokens: maxTokens ?? 4096 },
+            );
+            const text = extractChatText(response);
+            const code = text ? extractCode(text) : null;
+            if (!code) {
+                console.log("回答中未找到代码");
+                continue;
+            }
+            await saveAnswer(newAnswerRecord(problem, code, 1, model));
+            ok++;
+            console.log("✓");
+        } catch (error) {
+            console.log(`✗ ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+    console.log(`普通 API 生成完成: ${ok}/${problems.length} 条已写入 gen/answers`);
 }
 
 // 从云端下载 batch 结果并写入本地答案库 (write 与 recover 共用)

@@ -1,5 +1,9 @@
 {
   "name": "fuckview",
+  "scripts": {
+    "cli": "bun index.ts",
+    "typecheck": "tsc --noEmit"
+  },
   "devDependencies": {
     "@types/bun": "latest"
   },

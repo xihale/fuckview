@@ -4,7 +4,7 @@
 import { join } from "path";
 import { compile, isCompileSuccess } from "../api/compile";
 import { runGroup } from "../api/runGroup";
-import { brushTime } from "./brushTime";
+import { holdTiming, resolveMinutes } from "./idle";
 import { handleInput } from "./handleInput";
 import {
     appendSubmitLog,
@@ -41,12 +41,11 @@ export async function submitOne(
     const questionFullName = `第${rec.chapName}章-${rec.pname}`;
     console.log(`\n▼ ${rec.pname} (attempt ${rec.attempt})`);
 
-    // 1. 刷时长
+    // 1. 刷时长: exam WS 401 计时对(compile/save 打点不影响 accumTime, 2026-09-07 实测)
     if (!opts.noBrush) {
-        await brushTime(rec.eid, rec.code, {
-            minutes: opts.brushMinutes ?? [8, 18],
-            questionFullName,
-        });
+        const minutes = resolveMinutes(opts.brushMinutes ?? [8, 18]);
+        console.log(`  ⏳ 刷时长: 挂 ${minutes.toFixed(1)} 分钟`);
+        await holdTiming(rec.eid, minutes);
     }
 
     // 2. 编译
@@ -168,9 +167,20 @@ export async function submitAnswers(opts: SubmitOptions = {}): Promise<void> {
     }
     console.log(`待提交 ${records.length} 题`);
 
-    // 校验 token 可用 + 修复缺失元信息
+    // 校验 token 可用 + 修复缺失元信息。
+    // getCatalogList 已经按当前 --course 选择返回，因此这里也过滤掉其它课程的本地答案。
     try {
         const catalog = await getCatalogList();
+        const allowed = new Set(catalog.data.map((p) => p.pname));
+        const before = records.length;
+        records = records.filter((r) => allowed.has(r.pname));
+        if (before !== records.length) {
+            console.log(`已按当前课程过滤 ${before - records.length} 条其它课程答案`);
+        }
+        if (records.length === 0) {
+            console.log("当前课程没有待提交的答案");
+            return;
+        }
         await fixMissingMeta(records, catalog);
     } catch (err) {
         throw new Error(`AnyView token 可能失效（获取题目列表失败）: ${err}`);

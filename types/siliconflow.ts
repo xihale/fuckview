@@ -1,6 +1,9 @@
 // SiliconFlow 硅基流动 Batch API 类型定义
 // 文档: https://docs.siliconflow.cn/cn/userguide/guides/batch
 
+import type { ChatMessage } from "./chat";
+export type { ChatMessage } from "./chat";
+
 // ============ 文件上传 ============
 
 export interface SFFile {
@@ -55,11 +58,6 @@ export interface Batch {
 }
 
 // ============ 输入 jsonl 行 ============
-
-export interface ChatMessage {
-    role: "system" | "user" | "assistant";
-    content: string;
-}
 
 export interface BatchInputBody {
     model: string;

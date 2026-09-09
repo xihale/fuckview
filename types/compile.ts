@@ -1,10 +1,2 @@
-// Compile API Response
-export interface CompileResponse {
-    code: number;
-    message: string;
-    data: {
-        result: string;
-        cmpRightCount: number;
-        cmpErrorCount: number;
-    };
-}
+// 兼容薄层：真身在 gdb.ts（analysis/06-gdb-service.md）
+export type { CompileData, CompileResponse } from "./gdb.ts";

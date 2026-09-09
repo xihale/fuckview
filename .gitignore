@@ -3,3 +3,7 @@ node_modules/
 api/config.ts
 gen/
 index.js
+analysis/sourcemaps/
+tools/
+# 暂时忽略
+solutions/

@@ -1,24 +1,68 @@
-// fuckView CLI
-// 用法: bun index.ts <command> [options]
-//
-// 命令:
-//   legacy          老流程: 直接用 data/ 里现成答案跑一遍(原 main 逻辑)
-//   write           用硅基流动 batch 为未通过题目生成答案, 落盘到 gen/
-//   submit          刷时长后逐题提交 gen/ 里的答案, 通过则放入 data/
-//   fix             对 failed 的答案带错误信息重新生成(默认最多 3 次)
-//   all             全自动: write -> submit -> fix -> submit -> ... 直到无 pending/failed
-//   status          查看本地答案进度统计
-//   recover <id>    batch 中断后按 batch id 恢复下载结果
-//   list-batches    列出历史 batch 记录
+// fuckView CLI — 用法: bun index.ts help
+// 命令明细见文件底部 __USAGE__(help 命令打印同一份)。
 
 import { getCatalogList } from "./api/getCatalogList";
 import type { GetCatalogListResponse, CatalogItem } from "./types/catalog";
 import { solve } from "./utils/solve";
 import { writeAnswers, ingestBatchResults } from "./utils/write";
 import { submitAnswers, type SubmitOptions } from "./utils/submit";
+import { brushIdle } from "./utils/idle";
 import { fixAnswers } from "./utils/fix";
 import { loadAllAnswers } from "./utils/store";
 import { retrieveBatch } from "./api/siliconflow";
+import { listCourses, selectCourse } from "./utils/course";
+import {
+    getLabPracticeQuestions,
+    getLabOwnAnswers,
+    getLabQuestionMeta,
+} from "./api/anyviewExam";
+import type { PracticeOwnAnswer } from "./types/exam";
+import { config, setCourseSelection } from "./api/config";
+
+// practice: 只读列出实验题(弹窗答题)的练习题和作答状态, 不提交任何东西
+async function listPractice(eid?: number): Promise<void> {
+    const catalogResponse = await getCatalogList();
+    let problems = catalogResponse.data;
+    if (eid !== undefined) {
+        problems = problems.filter((p) => p.eid === eid);
+        if (problems.length === 0) throw new Error(`目录中没有 eid=${eid}`);
+    } else {
+        // 实验题/课设: 前端 getQuestionContent 里 questionType >= 3 走 LabCoding
+        problems = problems.filter((p) => p.questionType >= 3);
+    }
+    if (problems.length === 0) {
+        console.log("当前课程没有实验题 (弹窗答题只出现在实验题描述页里)");
+        return;
+    }
+    // 题型码 2026-09-07 实测: 5 = 编程(整文件实现, 如 Main.cpp)
+    const TYPE_NAME: Record<number, string> = {
+        1: "单选", 2: "多选", 3: "解答", 4: "编程", 5: "编程(整文件)",
+    };
+    for (const p of problems) {
+        // get/question 端点吃的是「题面 questionId」而非目录 eid (见 anyviewExam.ts 顶部注释)
+        const meta = await getLabQuestionMeta(p.eid);
+        const [questions, answers] = await Promise.all([
+            getLabPracticeQuestions(config.schemeId, meta.questionId),
+            getLabOwnAnswers(p.eid),
+        ]);
+        const answerOf = new Map<number, PracticeOwnAnswer>();
+        for (const a of answers) answerOf.set(a.practiceQuestionId, a);
+        console.log(
+            `\n■ ${p.pname} (eid=${p.eid}, questionId=${meta.questionId}, 第${p.chapName}章) 练习题 ${questions.length} 道`,
+        );
+        for (const q of questions) {
+            if (!q.pq) continue;
+            const own = answerOf.get(q.practiceQuestionId);
+            const done = own && String(own.pqe?.isTempSaved ?? "true") === "false";
+            console.log(
+                `  [${q.practiceQuestionId}] ${TYPE_NAME[q.pq.type] ?? q.pq.type}题`
+                + ` ${q.pq.remark ?? ""} ${q.point != null ? `${q.point}分` : ""}`
+                + ` | ${done ? "已提交" : own ? "仅暂存" : "未作答"}`
+                + ` | 截止: ${q.finishTime ?? "无"}`,
+            );
+        }
+    }
+}
 
 // 解析 --key value / --key=value / 布尔 flag
 function parseArgs(argv: string[]): Record<string, string | boolean> {
@@ -134,12 +178,15 @@ async function recover(batchId: string): Promise<void> {
 
 async function runAll(opts: {
     model?: string;
+    mode?: "batch" | "normal";
     limit?: number;
     maxAttempts: number;
     submitOpts: SubmitOptions;
 }): Promise<void> {
-    console.log("========= [1/2] write: 批量生成 =========");
-    await writeAnswers({ model: opts.model, limit: opts.limit });
+    console.log(
+        `========= [1/2] write: ${opts.mode === "normal" ? "普通 API 生成" : "批量生成"} =========`,
+    );
+    await writeAnswers({ model: opts.model, mode: opts.mode, limit: opts.limit });
     console.log("\n========= [2/2] submit: 逐题提交 =========");
     await submitAnswers(opts.submitOpts);
 
@@ -154,6 +201,7 @@ async function runAll(opts: {
         );
         await fixAnswers({
             model: opts.model,
+            mode: opts.mode,
             maxAttempts: opts.maxAttempts,
         });
         await submitAnswers(opts.submitOpts);
@@ -184,15 +232,39 @@ async function main() {
         noBrush: opt("no-brush") === true,
     };
     const pname = optStr("pname");
+    const courseSelector = optStr("course");
+    const mode: "batch" | "normal" =
+        opt("mode") === "normal" ||
+        opt("api") === "normal" ||
+        opt("normal") === true
+            ? "normal"
+            : "batch";
     if (pname) submitOpts.pnames = [pname];
+    if (courseSelector && !["list-courses", "courses", "select-course", "course", "practice"].includes(cmd)) {
+        await selectCourse(courseSelector);
+    }
 
     switch (cmd) {
+        case "help":
+        case "--help":
+        case "-h":
+            console.log(`fuckView — 用法: bun index.ts <command> [options]${__USAGE__}`);
+            break;
         case "legacy":
             await legacy();
             break;
         case "write":
             await writeAnswers({
                 model: optStr("model"),
+                mode,
+                limit: optInt("limit"),
+                dry: opt("dry") === true,
+            });
+            break;
+        case "write-normal":
+            await writeAnswers({
+                model: optStr("model"),
+                mode: "normal",
                 limit: optInt("limit"),
                 dry: opt("dry") === true,
             });
@@ -203,6 +275,7 @@ async function main() {
         case "fix":
             await fixAnswers({
                 model: optStr("model"),
+                mode,
                 limit: optInt("limit"),
                 dry: opt("dry") === true,
                 maxAttempts: optInt("max-attempts"),
@@ -212,6 +285,7 @@ async function main() {
         case "all":
             await runAll({
                 model: optStr("model"),
+                mode,
                 limit: optInt("limit"),
                 maxAttempts: optInt("max-attempts") ?? 3,
                 submitOpts,
@@ -219,6 +293,36 @@ async function main() {
             break;
         case "status":
             await status();
+            break;
+        case "practice":
+            await listPractice(optInt("eid"));
+            break;
+        case "idle":
+            if (optInt("scheme") && optInt("class")) {
+                setCourseSelection({ schemeId: optInt("scheme")!, classId: optInt("class")! });
+            }
+            await brushIdle({
+                minutes: parseMinutes(opt("brush")) ?? [5, 10],
+                pnames: pname ? [pname] : undefined,
+                limit: optInt("limit"),
+                includePassed: opt("include-passed") === true,
+                retryZero: opt("retry-zero") === true,
+                fresh: opt("fresh") === true,
+                dry: opt("dry") === true,
+            });
+            break;
+        case "list-courses":
+        case "courses":
+            await listCourses();
+            break;
+        case "select-course":
+        case "course":
+            if (rest[0] && !rest[0].startsWith("--")) {
+                await selectCourse(rest[0]);
+            } else {
+                await listCourses();
+                console.log("用法: bun index.ts select-course <序号|courseId|schemeId|课程名>");
+            }
             break;
         case "list-batches":
             await listBatches();
@@ -241,17 +345,32 @@ async function main() {
 const __USAGE__ = `
 命令:
   legacy                 老流程: 直接用 data/ 现成答案逐题提交
-  all [--brush 8-18] [--model m] [--max-attempts 3]
+  all [--brush 8-18] [--model m] [--max-attempts 3] [--course 2]
                          全自动: write -> submit -> fix/submit 循环到结束
-  write [--model m] [--limit n] [--dry]
-                         硅基流动 batch 批量生成未通过题目的答案 -> gen/
-  submit [--brush 8-18] [--pname CP03EX010] [--no-brush]
+                         加 --mode normal 使用普通 Chat Completions API
+  write [--model m] [--limit n] [--dry] [--mode batch|normal] [--course 2]
+                         生成未通过题目的答案（默认硅基流动 batch） -> gen/
+  write-normal [--model glm-5.3-flash] [--limit n] [--dry]
+                         使用 ForgeCode/Z.AI 普通 API 逐题生成答案 -> gen/
+  submit [--brush 8-18] [--pname CP03EX010] [--no-brush] [--course 2]
                          刷时长后逐题提交 gen/ 中 pending 的答案, 通过则放入 data/
-  fix [--model m] [--max-attempts 3] [--pname xxx]
+  fix [--model m] [--max-attempts 3] [--pname xxx] [--mode batch|normal] [--course 2]
                          对 failed 答案带错误信息重新生成
   status                 查看进度统计
+  practice [--eid N]     只读列出实验题弹窗练习题与作答状态(不提交)
+  idle [--brush 5-10] [--pname DC01PE18] [--limit n] [--course 2|--scheme 465 --class 381]
+                         批量挂机: 逐题 WS 计时积累 accumTime(不改代码/不判题)
+                         --include-passed 连已通过的题也挂; --fresh 清空挂机进度; --dry 只列出计划
+                         --retry-zero 重挂上轮 +0 的题(实验题 ES 系服务端不计时, 默认跳过)
   recover <batch_id>     恢复中断的 batch 下载结果
-  list-batches           列出历史 batch`;
+  list-courses           列出当前账号可用课程
+  select-course <选择>   选择课程（序号、courseId、schemeId 或完整名称）
+  list-batches           列出历史 batch
+
+课程选择（只对本次命令生效）:
+  write --course 2       使用第 2 门课程生成答案
+  submit --course 2      提交第 2 门课程的答案
+  all --course 2         对第 2 门课程执行全流程`;
 
 main().catch((err) => {
     console.error("执行失败:", err);

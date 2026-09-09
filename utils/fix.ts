@@ -12,6 +12,11 @@ import {
     uploadBatchFile,
     waitBatch,
 } from "../api/siliconflow";
+import {
+    chatCompletion,
+    DEFAULT_MODEL as NORMAL_DEFAULT_MODEL,
+    extractChatText,
+} from "../api/normal";
 import type { BatchInputLine } from "../types/siliconflow";
 import type { CatalogItem } from "../types/catalog";
 import {
@@ -30,6 +35,7 @@ import type { AnswerRecord } from "./store";
 
 export interface FixOptions {
     model?: string;
+    mode?: "batch" | "normal";
     maxAttempts?: number;
     limit?: number;
     pnames?: string[];
@@ -38,7 +44,8 @@ export interface FixOptions {
 
 export async function fixAnswers(opts: FixOptions = {}): Promise<void> {
     ensureGenDirs();
-    const model = opts.model ?? DEFAULT_MODEL;
+    const mode = opts.mode ?? "batch";
+    const model = opts.model ?? (mode === "normal" ? NORMAL_DEFAULT_MODEL : DEFAULT_MODEL);
     const maxAttempts = opts.maxAttempts ?? 3;
 
     // 找出需要修复的: failed 且 attempt < maxAttempts
@@ -69,6 +76,7 @@ export async function fixAnswers(opts: FixOptions = {}): Promise<void> {
     const catalog = await getCatalogList();
     const lines: BatchInputLine[] = [];
     const valid: AnswerRecord[] = [];
+    const docs = new Map<string, { problem: CatalogItem; doc: string }>();
 
     for (const rec of candidates) {
         const p = catalog.data.find((x) => x.pname === rec.pname);
@@ -83,6 +91,7 @@ export async function fixAnswers(opts: FixOptions = {}): Promise<void> {
             console.log(`⚠ ${rec.pname}: 获取题目内容失败 ${err}`);
             continue;
         }
+        docs.set(rec.pname, { problem: p, doc });
         const lastError = rec.lastError ?? "未知错误";
         lines.push({
             custom_id: rec.pname,
@@ -115,7 +124,16 @@ export async function fixAnswers(opts: FixOptions = {}): Promise<void> {
         return;
     }
     if (opts.dry) {
-        console.log(`[DRY] 将上传 ${lines.length} 条修复请求`);
+        console.log(
+            mode === "normal"
+                ? `[DRY] 将发送 ${lines.length} 条普通 API 修复请求`
+                : `[DRY] 将上传 ${lines.length} 条修复请求`,
+        );
+        return;
+    }
+
+    if (mode === "normal") {
+        await fixWithNormalApi(valid, docs, model);
         return;
     }
 
@@ -182,6 +200,56 @@ export async function fixAnswers(opts: FixOptions = {}): Promise<void> {
         console.log(`  ✓ ${rec.pname} -> attempt ${rec.attempt + 1}`);
     }
     console.log(`修复完成: ${ok}/${outputs.length} 条已更新, 用 submit 重新提交`);
+}
+
+async function fixWithNormalApi(
+    records: AnswerRecord[],
+    docs: Map<string, { problem: CatalogItem; doc: string }>,
+    model: string,
+): Promise<void> {
+    let ok = 0;
+    for (const [index, rec] of records.entries()) {
+        const job = docs.get(rec.pname);
+        if (!job) continue;
+        process.stdout.write(`[${index + 1}/${records.length}] ${rec.pname} ... `);
+        try {
+            const response = await chatCompletion(
+                [
+                    { role: "system", content: SYSTEM_PROMPT },
+                    {
+                        role: "user",
+                        content: buildFixPrompt(
+                            job.problem,
+                            job.doc,
+                            rec.code,
+                            rec.lastError ?? "未知错误",
+                            rec.attempt,
+                        ),
+                    },
+                ],
+                { model, temperature: 0.3, maxTokens: 4096 },
+            );
+            const text = extractChatText(response);
+            const code = text ? extractCode(text) : null;
+            if (!code) {
+                console.log("回答中未找到代码");
+                continue;
+            }
+            const next = newAnswerRecord(
+                job.problem,
+                code,
+                rec.attempt + 1,
+                model,
+            );
+            next.lastError = rec.lastError;
+            await saveAnswer(next);
+            ok++;
+            console.log(`✓ attempt ${next.attempt}`);
+        } catch (error) {
+            console.log(`✗ ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+    console.log(`普通 API 修复完成: ${ok}/${records.length} 条已更新, 用 submit 重新提交`);
 }
 
 async function downloadResults(batchId: string) {
