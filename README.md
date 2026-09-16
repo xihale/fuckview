@@ -17,8 +17,8 @@ AnyView 并非很垃圾，其实在我看来还是挺不错的。
 └─────────┘                └──────────────┘              └────┬────┘
                                                               │
 ┌─────────┐   刷时长(8~18min)   ┌─────────┐   通过            ▼
-│ submit  │ ──────────────────► │ 编译/运行 │ ──────────► data/Chapter*/
-│ 逐题提交 │ ◄────────────────── │ 失败信息  │
+│ submit  │ ──────────────────► │ 编译/运行 │ ──────────► data*/Chapter*/
+│ 逐题提交 │ ◄────────────────── │ 失败信息  │        (按题号自动选 data 或 data-ds)
 └─────────┘                     └─────────┘
       │                              │
       ▼                              ▼
@@ -63,7 +63,7 @@ bun index.ts submit [--brush 8-18] [--pname CP03EX010] [--limit 5] [--no-brush]
 
 # 2b. 批量挂机: 逐题 WS 计时给每题积累 accumTime(不改代码/不判题/pass 不变)
 bun index.ts idle --scheme 465 --class 381 [--brush 5-10] [--limit 20] [--dry]
-#     断点续挂(默认按 data/idle-state-<schemeId>.json 跳过已挂题), --fresh 重来
+#     断点续挂(默认按 gen/idle-state-<schemeId>.json 跳过已挂题), --fresh 重来
 #     连已通过的题也挂: --include-passed
 #     state 值语义: >0=已到账; 0=上轮挂了没涨(默认跳过, --retry-zero 重挂)
 #     已知不涨的: 已 pass 的题(服务端忽略) 和实验题 ES 系(465/466 服务端均不计时)
@@ -81,7 +81,7 @@ bun index.ts write --course 2 --mode normal --limit 20
 bun index.ts all --course 2 --mode normal
 bun index.ts recover <id>    # 恢复中断的 batch
 bun index.ts list-batches    # 历史 batch
-bun index.ts legacy          # 老流程: 直接用 data/ 现成答案逐题提交
+bun index.ts legacy          # 老流程: 直接用 data/ 或 data-ds/ 现成答案逐题提交
 ```
 
 注意: `submit` 刷时长是真实等待（默认每题 8~18 分钟），挂后台跑。`submit` 只提交 pending 的答案；failed 的先 `fix` 重新生成再提交，避免浪费刷时长的等待。课程选择不会改写 `api/config.ts`，进程结束后恢复默认；也可用 `ANYVIEW_SCHEME_ID`/`ANYVIEW_CLASS_ID` 设置默认课程。
@@ -101,7 +101,10 @@ bun index.ts legacy          # 老流程: 直接用 data/ 现成答案逐题提�
   - `api/anyviewExam.ts` 弹窗答题(实验题练习题) / 作业 / 测验接口（v2025.9 前端逆向）
 - `utils/` write(生成)/submit(提交)/fix(修复) 流程、挂机计时 idle、prompt、本地存储
 - `gen/` 生成的答案库（gitignore）：`answers/` 每题状态、`attempts/` 历史尝试、`batches/` 任务记录
-- `data/` 通过的答案（submodule，提交通过后自动写入 `data/ChapterX/xxx.c`）
+- `data/` C 程序设计答案（submodule `Anyview-Programming2024`，跟踪上游 `ver25` 分支；提交通过后自动写入 `data/ChapterX/xxx.c`）
+- `data-ds/` 数据结构答案（submodule `Anyview-DataStructure2025`，跟踪上游 `master`；作业写入 `data-ds/Homework/ChapterX/xxx.cpp`）
+  - 读取/写入按题号自动选仓库（`utils/dataRepo.ts`）：`CP*` → `data/`，`DC*`/`DS*` → `data-ds/`
+  - 更新两个子模块到上游最新：`git submodule update --remote data data-ds` 后提交指针变化
 - `types/` AnyView 统一 TS 类型（`types/index.ts` barrel，按服务分文件）
 - `analysis/` **平台逆向分析工程**：10 篇文档（架构/鉴权/五服务/数据格式与判题/WAF 与源站直连/accumTime 与挂机）+ 117 个 sourcemap（`analysis/sourcemaps/INDEX.md`）+ 一键重抓脚本 `bun analysis/tools/grab-sourcemaps.ts`；完整源码树归档在 `~/Desktop/anyview/fuckView-anyview-frontend-src.tar.gz`
 - `tools/origin/` 直连校内源站工具箱（被云 WAF 拉黑时用）：TLS 直连客户端 + XFF 登录 + stuCode 快照恢复，见该目录 README 与 `analysis/09-waf-and-origin.md`

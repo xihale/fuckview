@@ -1,11 +1,12 @@
 // submit: 读取本地答案 -> 刷时长 -> 编译 -> 运行 -> (需要输入则处理) -> 通过则放入 data/
 // 用法: bun index.ts submit [--min 8] [--max 18] [--brush 8-18] [--limit N] [--pname CP03EX010]
 
-import { join } from "path";
+import { dirname } from "path";
 import { compile, isCompileSuccess } from "../api/compile";
 import { runGroup } from "../api/runGroup";
 import { holdTiming, resolveMinutes } from "./idle";
 import { handleInput } from "./handleInput";
+import { answerOutPath } from "./dataRepo";
 import {
     appendSubmitLog,
     ensureGenDirs,
@@ -26,12 +27,7 @@ export interface SubmitOptions {
     noBrush?: boolean;
 }
 
-// 通过后的答案写入 data/ (临时本地目录, 不动 submodule)
-const DATA_OUT_DIR = join("data");
-
-function answerFileName(pname: string): string {
-    return `${pname}.c`;
-}
+// 通过后的答案写入所选 data 仓库 (临时本地目录, 不动 submodule)
 
 // 单题提交流程
 export async function submitOne(
@@ -121,13 +117,13 @@ async function markPassed(rec: AnswerRecord): Promise<void> {
     rec.passedTime = new Date().toISOString();
     await saveAnswer(rec);
 
-    // 写入 data/{chapter}/{pname}.c
-    const dir = join(DATA_OUT_DIR, `Chapter${rec.chapName}`);
+    // 按题号路由到 data / data-ds 仓库的原生布局
+    const out = answerOutPath(rec.pname, rec.chapName);
     const fs = require("fs");
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    await Bun.write(join(dir, answerFileName(rec.pname)), rec.code);
+    fs.mkdirSync(dirname(out), { recursive: true });
+    await Bun.write(out, rec.code);
 
-    console.log(`  ✓ 通过! 答案已放入 data/Chapter${rec.chapName}/${answerFileName(rec.pname)}`);
+    console.log(`  ✓ 通过! 答案已放入 ${out}`);
     await appendSubmitLog(`PASS ${rec.pname} attempt=${rec.attempt}`);
 }
 

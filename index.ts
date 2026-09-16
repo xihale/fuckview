@@ -344,7 +344,7 @@ async function main() {
 
 const __USAGE__ = `
 命令:
-  legacy                 老流程: 直接用 data/ 现成答案逐题提交
+  legacy                 老流程: 直接用 data//data-ds/ 现成答案逐题提交(按题号自动选仓库)
   all [--brush 8-18] [--model m] [--max-attempts 3] [--course 2]
                          全自动: write -> submit -> fix/submit 循环到结束
                          加 --mode normal 使用普通 Chat Completions API
@@ -353,7 +353,7 @@ const __USAGE__ = `
   write-normal [--model glm-5.3-flash] [--limit n] [--dry]
                          使用 ForgeCode/Z.AI 普通 API 逐题生成答案 -> gen/
   submit [--brush 8-18] [--pname CP03EX010] [--no-brush] [--course 2]
-                         刷时长后逐题提交 gen/ 中 pending 的答案, 通过则放入 data/
+                         刷时长后逐题提交 gen/ 中 pending 的答案, 通过则放入对应 data 仓库
   fix [--model m] [--max-attempts 3] [--pname xxx] [--mode batch|normal] [--course 2]
                          对 failed 答案带错误信息重新生成
   status                 查看进度统计

@@ -27,7 +27,8 @@ export interface IdleOptions {
     retryZero?: boolean;
 }
 
-const stateFile = () => `data/idle-state-${config.schemeId}.json`;
+// 状态放 gen/ (gitignore, 项目自有目录), 不污染 data 子模块
+const stateFile = () => `gen/idle-state-${config.schemeId}.json`;
 
 async function loadState(): Promise<Record<string, number>> {
     const f = Bun.file(stateFile());
