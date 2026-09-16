@@ -298,8 +298,13 @@ async function main() {
             await listPractice(optInt("eid"));
             break;
         case "idle":
-            if (optInt("scheme") && optInt("class")) {
-                setCourseSelection({ schemeId: optInt("scheme")!, classId: optInt("class")! });
+            if (opt("scheme") !== undefined || opt("class") !== undefined) {
+                const scheme = optInt("scheme");
+                const classId = optInt("class");
+                if (!scheme || !classId) {
+                    throw new Error("--scheme/--class 需要成对的正整数, 例如 --scheme 465 --class 381");
+                }
+                setCourseSelection({ schemeId: scheme, classId });
             }
             await brushIdle({
                 minutes: parseMinutes(opt("brush")) ?? [5, 10],
